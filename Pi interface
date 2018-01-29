@@ -1,0 +1,847 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO.Ports;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Timers;
+namespace PI
+{
+    public enum MyEvents
+    {
+        // enum for events
+        wrongdata,
+        errorpi,
+        XRAYon,
+        XRAYoff,
+        XRAYPION,
+        XRAYPIOFF,
+        SETGENERATORKV,
+        SETGENERATORMA,
+        READFAULT,
+        ReadGeneratorKV,
+        ReadGeneratorMA,
+        Readgnfult,
+        Resetgnfult,
+        Scanon,
+        Scanoff,
+        Shutteron,
+        Shutteroff,
+        Emgon,
+        emgof,
+        Syncon,
+        Syncoff,
+        Turnoff, Alarmon, Alarmof, OutputOption, OutputOptionof, XDAQ_on, XDAQ_off, ReadSensors, SetScanDirectionoff, ReadShutteron, ReadShutteroff, ReadEMGoff, ReadEMGon, ReadStandbyon, ReadStandbyoff, ReadLampMonitor, Startwatch, InterfaceWatchdogError, NoResponseFromGenerator, ShutterOpenError, Misspacket, NoProblem, GeneratorFault, GeneratorFaultContact, InternalErrorF5, ShutterClosingError, InternalWatchdogError, InternalErrorK1, SensorFault, GeneratorPacketMismatch, SetScanDirection, pieSensorserorr, pieStandByRunMode, pieStandByStandByMode, pieEMGerorr, ReadGeneratorFault, ResetGeneratorFault
+    }
+
+    public class CEVENTargs : EventArgs
+    {
+        public MyEvents MyEvent { get; set; }
+        //clase event haa baraie eventhaiii ke chizii nemifreste
+    }
+    public class CREADEVENT : EventArgs
+    {
+        public byte FReadvalue { get; internal set; }
+        public CREADEVENT(byte readvalue)
+        {
+            //classe eventha baraie eventhai ke meghdar mikhoone va mifreste
+            FReadvalue = readvalue;
+        }
+    }
+    
+    struct serialpacket
+    {
+        public byte argumant;
+        public byte command;
+    }
+    public class CPI_Interface
+    {
+        private int State = 1;
+        static int count, count1 = 0;
+        serialpacket s2;
+        private static System.Timers.Timer timer, timer1;
+        byte x,rkv,r;
+        public byte FReadkv;
+        public float FReadmA;
+        public byte FReadsensor;
+        public byte FSensor = 0;
+        public byte FSensorArgs = 0;
+        public byte FTH = 0, FTL = 0;
+        const byte st = 255;
+    
+        const byte en = 0;
+        int i = 0, j = 0;
+        static string comm;
+        byte[] data, w;
+        bool status = true;
+        SerialPort port;
+        Queue<serialpacket> q = new Queue<serialpacket>();
+        Semaphore smp1 = new Semaphore(1, 1000);
+        byte[] RecievedPacket = new byte[5];
+        public bool FCom;
+        //***********************************************************
+        public CPI_Interface(string com)
+        {
+            try
+            {
+                comm = com;
+                port = new SerialPort(comm, 9600, Parity.None, 8, StopBits.One);
+                if (port.IsOpen == false)
+                {                   
+                    port.Open();
+                    FCom = true;
+                }
+                else
+                {
+                    FCom = false;
+                }
+                port.DataReceived += new SerialDataReceivedEventHandler(DataReceivedHandler);
+                SetTimer1();
+            }
+            catch (Exception)
+            {               
+            }  
+        }
+        //events
+        public event EventHandler<CEVENTargs> EEvents;
+        public event EventHandler<CREADEVENT> EReadsensors, EReadKV, EReadmA, EReadlamp, EReadgeneratorfault;
+        //************************************************************
+
+
+        
+        private void SetTimer1()
+        {
+            //timer baraie frestade start watch
+            timer1 = new System.Timers.Timer(2000); // Everytime timer ticks, timer_Tick will be called
+            timer1.Elapsed += timer_Tick1;
+            timer1.Enabled = true;
+        }
+        private void SetTimer()
+        {
+            //timer khali kardane saf
+            timer = new System.Timers.Timer(200); // Everytime timer ticks, timer_Tick will be called
+            timer.Elapsed += timer_Tick;
+            timer.Enabled = true;
+        }
+        private void sendargcomm(byte b, byte a)
+        {
+            s2 = new serialpacket();
+            s2.argumant = a;
+            s2.command = b;
+            q.Enqueue(s2);
+            SetTimer();
+        }
+        private void write()
+        {
+            try
+            {
+                status = false;
+                w = new byte[4] { st, q.ElementAt<serialpacket>(0).command, q.ElementAt<serialpacket>(0).argumant, en };
+                if (port.IsOpen == true)
+                {
+                    port.Write(w, 0, 4);
+                }
+                count = 0;
+
+            }
+            catch (Exception)
+            
+            { 
+            }
+        }
+        private void timer_Tick(Object sender, ElapsedEventArgs e)
+        {
+            smp1.WaitOne();
+            if (q.Count != 0)
+            {
+                count1++;
+                
+                if (status == true)
+                {
+                    write();
+                }
+               
+                if (status != true && count1 == 10)
+                {
+                    //baraie check kardane vasl boodane pi
+                    if (EEvents != null)
+                    EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.errorpi });
+                    count1++;
+                    q.Dequeue();
+                }
+            }
+            smp1.Release();
+        }
+        //
+        private void timer_Tick1(Object sender, ElapsedEventArgs e)
+        {
+            smp1.WaitOne();
+
+            if (q.Count==0)
+            {
+               
+                    byte[] s = new byte[4] { st, 26, 0, en };
+                if(port.IsOpen==true)
+                    port.Write(s, 0, 4);
+                    //count = 0;
+                   status = false;
+                
+           
+            }
+            smp1.Release();
+
+        }
+        //******/**************************************************************
+        //********************************************************
+        //methods
+        //************************
+
+        public void MPortclose()
+        {
+            port.Close();
+            port.Dispose();
+        }
+
+        public void MXray_on()
+        {
+            sendargcomm(1, 1);
+        }
+        public void MXray_off()
+        {
+            sendargcomm(1, 0);
+        }
+        public void MSetGeneratorKV(byte kvvalue)
+        {
+            if (kvvalue >= 200)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.wrongdata });
+            }
+            if (kvvalue < 200)
+            {
+                sendargcomm(2, kvvalue);
+            }
+        }
+        public void MSetGeneratorMA(float mlvalue)
+        {
+            if (mlvalue >= 2)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.wrongdata });
+            }
+            if (mlvalue < 2)
+            {
+               mlvalue= (mlvalue * 1000)/33.0f;
+                x = (byte)(mlvalue);
+                sendargcomm(3, x);
+            }
+        }
+
+        public void MReadGeneratorKV()
+        {
+            sendargcomm(4, 0);
+        }
+
+        public void MReadGeneratorMA()
+        {
+            sendargcomm(5, 0);
+        }
+        public void MReadGeneratorFault()
+        {
+            sendargcomm(6, 0);
+        }
+        public void MResetGeneratorFault()
+        {
+            sendargcomm(7, 0);
+        }
+        public void MScanon()
+        {
+            sendargcomm(11, 1);
+        }
+        public void MScanoff()
+        {
+            sendargcomm(11, 0);
+        }
+        public void MShutteroff()
+        {
+            sendargcomm(12, 0);
+        }
+        public void MShutteron()
+        {
+            sendargcomm(12, 1);
+        }
+
+        public void MEMG()
+        {
+            sendargcomm(14, 0);
+        }
+        public void MTurnOff()
+        {
+            sendargcomm(15, 0);
+        }
+        public void MAlarmoff()
+        {
+            sendargcomm(16, 0);
+        }
+        public void MAlarmon()
+        {
+            sendargcomm(16, 1);
+        }
+        public void MReadfult()
+        {
+            sendargcomm(17, 1);
+        }
+        public void MOutputOption1()
+        {
+            sendargcomm(18, 1);
+        }
+        public void MOutputOption1off()
+        {
+            sendargcomm(18, 0);
+        }
+        public void MXDAQ_off()
+        {
+            sendargcomm(19, 1);
+        }
+        public void MXDAQ_on()
+        {
+            sendargcomm(19, 0);
+        }
+        public void MReadSensors()
+        {
+            sendargcomm(20, 0);
+        }
+        public void MSetScanDirection()
+        {
+            sendargcomm(21, 1);
+        }
+        public void MSetScanDirectionoff()
+        {
+            sendargcomm(21, 0);
+        }
+        public void MReadShutter()
+        {
+            sendargcomm(22, 0);
+        }
+        public void MReadEMG()
+        {
+            sendargcomm(23, 0);
+        }
+        public void MReadStandby()
+        {
+
+            sendargcomm(24, 0);
+
+        }
+        public void MReadLampMonitor()
+        {
+            sendargcomm(25, 0);
+        }
+        public void MStartwatch()
+        {
+            sendargcomm(26, 0);
+        }
+        //***********************************************************
+        private void events()
+        {
+
+            //**************************xon va xoff**************************
+            if (RecievedPacket[0] == 1 && RecievedPacket[1] == 1)
+            {
+                if(EEvents!=null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.XRAYon });
+
+            }
+            if (RecievedPacket[0] == 1 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.XRAYoff });
+
+            }
+            //xha
+
+            //************************setkv and set ml*****************
+            if (RecievedPacket[0] == 3)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.SETGENERATORMA });
+
+
+            }
+            if (RecievedPacket[0] == 2)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.SETGENERATORKV });
+
+
+            }
+            //***************************readkv && readml*****************************************
+            if (RecievedPacket[0] == 4)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ReadGeneratorKV });
+                
+                rkv = RecievedPacket[1];
+                FReadkv = rkv;
+                if(EReadKV!=null)
+                EReadKV.Invoke(this, new CREADEVENT(rkv));
+            }
+            if (RecievedPacket[0] == 5)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ReadGeneratorMA });
+                FReadmA = RecievedPacket[1];
+                FReadmA = (FReadmA * 33)/1000.0f;
+                if(EReadmA!=null)
+                EReadmA.Invoke(this, new CREADEVENT(r));
+            }
+            //******************************readgenaratorfult****************************************
+            if (RecievedPacket[0] == 6)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ReadGeneratorFault });
+                rkv = RecievedPacket[1];
+                if(EReadgeneratorfault!=null)
+                EReadgeneratorfault.Invoke(this, new CREADEVENT(rkv));
+            }
+            //******************************resetgenarotfult******************************************
+            if (RecievedPacket[0] == 7)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ResetGeneratorFault });
+
+            }
+            //**********************scanon va of*********************
+            if (RecievedPacket[0] == 11 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Scanon });
+
+            }
+            if (RecievedPacket[0] == 11 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Scanoff });
+
+            }
+
+            //***************************shutther*********************************
+            if (RecievedPacket[0] == 12 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Shutteron });
+
+            }
+            if (RecievedPacket[0] == 12 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Shutteroff });
+
+            }
+            //*************************syns on va off******************************
+            if (RecievedPacket[0] == 13 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Syncon });
+
+            }
+            if (RecievedPacket[0] == 13 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Syncoff });
+
+            }
+            //*************************emg on va off******************************
+          /*  if (RecievedPacket[0] == 14 && RecievedPacket[1] == 1)
+            {
+                event1.Invoke(this, new EVENTargs { MyEvent = MyEvents.emgon });
+
+            }*/
+            if (RecievedPacket[0] == 14 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Emgon });
+
+            }
+            //********************turnoff**********************************************
+            if (RecievedPacket[0] == 15 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Turnoff });
+
+            }
+            //**************************alarm on va of*******************************
+            if (RecievedPacket[0] == 16 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Alarmon });
+
+            }
+            if (RecievedPacket[0] == 16 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Alarmof });
+
+            }
+            //*************************readfult**********************************
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.NoProblem });
+
+            }
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.GeneratorFault });
+
+            }
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 2)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.GeneratorFaultContact });
+
+            }
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 3)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.InternalErrorF5 });
+
+            }
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 4)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ShutterClosingError });
+
+            }
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 5)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.NoResponseFromGenerator });
+
+            }
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 6)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ShutterOpenError });
+
+            }
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 7)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.InternalWatchdogError });
+
+            }
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 8)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.InterfaceWatchdogError });
+
+            }
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 9)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.InternalErrorK1 });
+
+            }
+
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 10)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.SensorFault });
+
+            }
+            if (RecievedPacket[0] == 17 && RecievedPacket[1] == 11)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.GeneratorPacketMismatch });
+
+            }
+            //********************************OutputOption**************************
+            if (RecievedPacket[0] == 18 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.OutputOption });
+
+            }
+            if (RecievedPacket[0] == 18 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.OutputOptionof });
+
+            }
+            //********************************Xdaqoff**************************
+            if (RecievedPacket[0] == 19 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.XDAQ_off });
+
+            }
+            if (RecievedPacket[0] == 19 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.XDAQ_on });
+
+            }
+            //********************************ReadSensors**************************
+            if (RecievedPacket[0] == 20)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ReadSensors });
+
+                FReadsensor = RecievedPacket[1];
+                if (EReadsensors!=null)
+                EReadsensors.Invoke(this, new CREADEVENT(rkv));
+
+            }
+            //********************************SetScanDirection **************************
+            if (RecievedPacket[0] == 21 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.SetScanDirection });
+
+            }
+            if (RecievedPacket[0] == 21 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.SetScanDirectionoff });
+
+            }
+
+            //****************************readshuter***************************************
+            if (RecievedPacket[0] == 22 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ReadShutteron });
+
+            }
+            if (RecievedPacket[0] == 22 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ReadShutteroff });
+
+            }
+            //**********************reademg***************************************************
+           if (RecievedPacket[0] == 23 && RecievedPacket[1] == 1)
+           {
+               if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ReadEMGon });
+
+            }
+            if (RecievedPacket[0] == 23 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ReadEMGoff });
+
+            }
+            //**********************readstandby***************************************************
+            if (RecievedPacket[0] == 24 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ReadStandbyon });
+
+            }
+            if (RecievedPacket[0] == 24 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ReadStandbyoff });
+
+            }
+            //**********************readstandby***************************************************
+            if (RecievedPacket[0] == 25)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ReadLampMonitor });
+
+                rkv = RecievedPacket[1];
+                if(EReadlamp!=null)
+                EReadlamp.Invoke(this, new CREADEVENT(rkv));
+
+            }
+
+            //***********************startwatch*****************************************************
+            if (RecievedPacket[0] == 26)
+            {
+                if (EEvents != null)
+                {
+                    if (EEvents != null)
+                    EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Startwatch });
+                }
+                
+            }
+
+            //*************************errorrha***********************************
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.NoProblem });
+
+            }
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.GeneratorFault });
+
+            }
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 2)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.GeneratorFaultContact });
+
+            }
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 3)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.InternalErrorF5 });
+
+            }
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 4)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ShutterClosingError });
+
+            }
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 5)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.NoResponseFromGenerator });
+
+            }
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 6)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.ShutterOpenError });
+
+            }
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 7)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.InternalWatchdogError });
+
+            }
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 8)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.InterfaceWatchdogError });
+
+            }
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 9)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.InternalErrorK1 });
+
+            }
+
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 10)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.SensorFault });
+
+            }
+            if (RecievedPacket[0] == 41 && RecievedPacket[1] == 11)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.GeneratorPacketMismatch });
+
+            }
+            //pisensorerrorr
+            if (RecievedPacket[0] == 40)
+            {
+                FSensorArgs = RecievedPacket[1];
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.pieSensorserorr });
+          
+
+            }
+            //pieStandBy
+            if (RecievedPacket[0] == 42 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.pieStandByRunMode });
+
+            }
+            if (RecievedPacket[0] == 42 && RecievedPacket[1] == 0)
+            {
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.pieStandByStandByMode });
+
+            }
+            //piemg
+            if (RecievedPacket[0] == 43)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.pieEMGerorr });
+
+            }
+            //pixray
+            if (RecievedPacket[0] == 44 && RecievedPacket[1] == 1)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.XRAYPION });
+
+            }
+            if (RecievedPacket[0] == 44 && RecievedPacket[1] == 0)
+            {
+                if (EEvents != null)
+                EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.XRAYPIOFF });
+
+            }
+
+        }
+        private void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e)
+        {
+            SerialPort port = (SerialPort)sender;
+            count = port.BytesToRead;
+            data = new byte[count];
+            port.Read(data, 0, count);
+           // if (count >= 6)
+            for (int i = 0; i < count; i++)
+            {
+
+               // if (count > 6)
+                //{
+
+                    if (data[i] == st &&State!=3 &&State!=4 )
+                    {
+                        if (State != 1)
+                        {
+                            if (EEvents != null)
+                            EEvents.Invoke(this, new CEVENTargs { MyEvent = MyEvents.Misspacket });
+                            //  count = 0;
+                            // Its a  error, packet mismatch
+                        }
+                        State = 1;
+                    }
+               // }
+                else
+                {
+                    RecievedPacket[State - 1] = data[i];
+                    State++;
+                    if (State == 6)
+                    {
+                        if (q.Count != 0)
+                        {
+                            q.Dequeue();
+                        }
+                        State = 1;
+                        status = true;
+
+                        FTH=RecievedPacket[2];
+                        FTL = RecievedPacket[3];
+
+                        events();
+                        count1 += 10;
+
+                        // Its a  packet
+                    }
+                }
+            }
+        }
+
+
+        
+    }
+}
+
+
